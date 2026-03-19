@@ -328,32 +328,14 @@ with tab_portfolio:
     with col_t1:
         trade_asset = st.selectbox("Актив", all_assets_p, key="trade_asset")
         
-    live_price = 0.0
-    if trade_asset:
-        # Live Price Fetching
-        try:
-            import yfinance as yf
-            from chart_engine import get_internal_ticker
-            internal_t = get_internal_ticker(trade_asset)
-            # Use fast fetch for a single price
-            fast_data = yf.download(internal_t, period="1d", interval="1m", progress=False)
-            if not fast_data.empty:
-                # Get the last close price, taking care of multi-index issues
-                if isinstance(fast_data.columns, pd.MultiIndex):
-                    live_price = float(fast_data['Close'][internal_t].dropna().iloc[-1])
-                else:
-                    live_price = float(fast_data['Close'].dropna().iloc[-1])
-        except Exception as e:
-            pass
-            
-        # Fallback to snapshotted price if live failed
-        if live_price == 0.0 and not df_scan.empty:
-            match = df_scan[df_scan["Asset"] == trade_asset]
-            if not match.empty:
-                live_price = float(match.iloc[0]["Price"])
+    initial_price = 0.0
+    if trade_asset and not df_scan.empty:
+        match = df_scan[df_scan["Asset"] == trade_asset]
+        if not match.empty:
+            initial_price = float(match.iloc[0]["Price"])
 
     with col_t2:
-        trade_price = st.number_input("Цена ($)", value=float(live_price) if float(live_price) > 0 else 0.01, min_value=0.01, step=0.01, key=f"trade_price_{trade_asset}" if trade_asset else "trade_price")
+        trade_price = st.number_input("Цена ($)", value=initial_price if initial_price > 0 else 0.01, min_value=0.01, step=0.01, key=f"trade_price_{trade_asset}" if trade_asset else "trade_price")
     with col_t3:
         trade_qty = st.number_input("Кол-во", value=1, min_value=1, step=1, key="trade_qty")
     with col_t4:
@@ -379,32 +361,56 @@ with tab_portfolio:
                         st.toast(f"❌ {msg}")
                         
     if trade_asset:
-        st.markdown("##### 📈 Live График для Торговли")
-        if "zoom_level" not in st.session_state:
-            st.session_state.zoom_level = 100
-        col_ptf, col_p_zin, col_p_zout, _ = st.columns([1.5, 0.5, 0.5, 1.5])
-        with col_ptf:
-            port_tf = st.radio(
-                "Таймфрейм", ["15m", "1h", "4h", "1d"], index=0, horizontal=True,
-                label_visibility="collapsed", key="port_tf_sel"
-            )
-        with col_p_zin:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🔍+", help="Увеличить", use_container_width=True, key="btn_z_in_2"):
-                st.session_state.zoom_level = max(20, st.session_state.zoom_level - 30)
-                st.rerun()
-        with col_p_zout:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🔍−", help="Уменьшить", use_container_width=True, key="btn_z_out_2"):
-                st.session_state.zoom_level = min(500, st.session_state.zoom_level + 30)
-                st.rerun()
+        
+        @st.fragment(run_every="1s")
+        def live_portfolio_chart(asset):
+            st.markdown("##### 📈 Live График для Торговли")
+            
+            # 1. Very fast live price fetch inside the fragment
+            live_price = initial_price
+            try:
+                import yfinance as yf
+                from chart_engine import get_internal_ticker
+                internal_t = get_internal_ticker(asset)
+                fast_data = yf.download(internal_t, period="1d", interval="1m", progress=False)
+                if not fast_data.empty:
+                    if isinstance(fast_data.columns, pd.MultiIndex):
+                        live_price = float(fast_data['Close'][internal_t].dropna().iloc[-1])
+                    else:
+                        live_price = float(fast_data['Close'].dropna().iloc[-1])
+            except Exception:
+                pass
+            
+            st.markdown(f"**⚡ Текущая рыночная цена:** `${live_price:,.2f}` *(обновляется каждую секунду)*")
+
+            if "zoom_level" not in st.session_state:
+                st.session_state.zoom_level = 100
                 
-        with st.spinner(f"Загрузка графика {trade_asset}..."):
-            fig, patterns = generate_chart(trade_asset, timeframe=port_tf, zoom_bars=st.session_state.get("zoom_level", 100))
+            col_ptf, col_p_zin, col_p_zout, _ = st.columns([1.5, 0.5, 0.5, 1.5])
+            with col_ptf:
+                port_tf = st.radio(
+                    "Таймфрейм", ["15m", "1h", "4h", "1d"], index=0, horizontal=True,
+                    label_visibility="collapsed", key=f"port_tf_sel_{asset}"
+                )
+            with col_p_zin:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("🔍+", help="Увеличить", use_container_width=True, key=f"btn_z_in_2_{asset}"):
+                    st.session_state.zoom_level = max(20, st.session_state.zoom_level - 30)
+                    st.rerun()
+            with col_p_zout:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("🔍−", help="Уменьшить", use_container_width=True, key=f"btn_z_out_2_{asset}"):
+                    st.session_state.zoom_level = min(500, st.session_state.zoom_level + 30)
+                    st.rerun()
+                    
+            fig, patterns = generate_chart(asset, timeframe=port_tf, zoom_bars=st.session_state.get("zoom_level", 100))
             if patterns:
                 st.info(f"🔍 **Обнаружены паттерны:** {', '.join(patterns)}")
             if fig:
                 st.pyplot(fig)
+                
+        # Mount and start the fragment
+        live_portfolio_chart(trade_asset)
     
     st.markdown("---")
     

@@ -10,41 +10,52 @@ import numpy as np
 # ============================================================
 
 def identify_patterns(df):
-    """Detect chart patterns: Engulfing, Double Bottom, Head & Shoulders, Flag, Hammer."""
-    patterns = []
+    """Detect chart patterns and return list of unique names + 2 Pandas Series (bullish/bearish markers)."""
+    patterns = set()
+    
+    # Create empty Series mapped to df index with NaNs
+    bull_markers = pd.Series(np.nan, index=df.index)
+    bear_markers = pd.Series(np.nan, index=df.index)
     
     if len(df) < 10:
-        return patterns
+        return list(patterns), bull_markers, bear_markers
         
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-    
-    # --- Bullish Engulfing ---
-    if prev['Close'] < prev['Open'] and last['Close'] > last['Open']:
-        if last['Open'] <= prev['Close'] and last['Close'] >= prev['Open']:
-            patterns.append("Bullish Engulfing 🟢")
+    for i in range(1, len(df)):
+        last = df.iloc[i]
+        prev = df.iloc[i-1]
+        
+        # Bullish Engulfing
+        if prev['Close'] < prev['Open'] and last['Close'] > last['Open']:
+            if last['Open'] <= prev['Close'] and last['Close'] >= prev['Open']:
+                patterns.add("Bullish Engulfing 🟢")
+                bull_markers.iloc[i] = last['Low'] * 0.99
+                
+        # Bearish Engulfing
+        if prev['Close'] > prev['Open'] and last['Close'] < last['Open']:
+            if last['Open'] >= prev['Close'] and last['Close'] <= prev['Open']:
+                patterns.add("Bearish Engulfing 🔴")
+                bear_markers.iloc[i] = last['High'] * 1.01
+                
+        # Hammer
+        body = abs(last['Close'] - last['Open'])
+        lower_shadow = min(last['Close'], last['Open']) - last['Low']
+        upper_shadow = last['High'] - max(last['Close'], last['Open'])
+        if body > 0 and lower_shadow > 2 * body and upper_shadow < body * 0.5:
+            patterns.add("Hammer 🔨")
+            bull_markers.iloc[i] = last['Low'] * 0.99
 
-    # --- Bearish Engulfing ---
-    if prev['Close'] > prev['Open'] and last['Close'] < last['Open']:
-        if last['Open'] >= prev['Close'] and last['Close'] <= prev['Open']:
-            patterns.append("Bearish Engulfing 🔴")
-
-    # --- Hammer (Молот) ---
-    body = abs(last['Close'] - last['Open'])
-    lower_shadow = min(last['Close'], last['Open']) - last['Low']
-    upper_shadow = last['High'] - max(last['Close'], last['Open'])
-    if body > 0 and lower_shadow > 2 * body and upper_shadow < body * 0.5:
-        patterns.append("Hammer 🔨")
-
-    # --- Double Bottom (basic) ---
+    # Double Bottom (basic) over recent rolling 20
     if len(df) > 20:
         recent_lows = df['Low'].rolling(window=20).min()
-        current_low = df['Low'].iloc[-1]
-        hist_low = recent_lows.iloc[-2]
-        if hist_low > 0 and abs(current_low - hist_low) / hist_low < 0.02:
-            patterns.append("Possible Double Bottom 🟢")
-    
-    # --- Head and Shoulders (simplified) ---
+        for i in range(20, len(df)):
+            current_low = df['Low'].iloc[i]
+            hist_low = recent_lows.iloc[i-2] if not pd.isna(recent_lows.iloc[i-2]) else 0
+            if hist_low > 0 and abs(current_low - hist_low) / hist_low < 0.02:
+                if (i+1 < len(df) and df['Low'].iloc[i] <= df['Low'].iloc[i-1] and df['Low'].iloc[i] <= df['Low'].iloc[i+1]) or i == len(df)-1:
+                    patterns.add("Double Bottom 🟢")
+                    bull_markers.iloc[i] = df['Low'].iloc[i] * 0.99
+
+    # Head and Shoulders
     if len(df) >= 30:
         segment = df.tail(30)
         highs = segment['High'].values
@@ -54,21 +65,11 @@ def identify_patterns(df):
         right_peak = np.max(highs[2*third:])
         if head_peak > left_peak and head_peak > right_peak:
             if abs(left_peak - right_peak) / head_peak < 0.05:
-                patterns.append("Head & Shoulders ⚠️")
+                patterns.add("Head & Shoulders ⚠️")
+                head_idx = segment['High'].iloc[third:2*third].idxmax()
+                bear_markers.loc[head_idx] = df.loc[head_idx, 'High'] * 1.01
 
-    # --- Flag (simplified: trending then consolidation) ---
-    if len(df) >= 20:
-        trend_segment = df.iloc[-20:-5]
-        flag_segment = df.tail(5)
-        trend_range = trend_segment['High'].max() - trend_segment['Low'].min()
-        flag_range = flag_segment['High'].max() - flag_segment['Low'].min()
-        if trend_range > 0 and flag_range < trend_range * 0.3:
-            if trend_segment['Close'].iloc[-1] > trend_segment['Close'].iloc[0]:
-                patterns.append("Bull Flag 🏳️")
-            else:
-                patterns.append("Bear Flag 🏴")
-
-    return patterns
+    return list(patterns), bull_markers, bear_markers
 
 # ============================================================
 # SUPPORT / RESISTANCE
@@ -196,7 +197,7 @@ def generate_chart(ticker_symbol, timeframe="1d", zoom_bars=100):
         if len(df) < 5:
             return None, []
             
-        patterns = identify_patterns(df)
+        patterns, bull_markers, bear_markers = identify_patterns(df)
         support, resistance = calculate_support_resistance(df)
 
         # ============================================================
@@ -242,9 +243,20 @@ def generate_chart(ticker_symbol, timeframe="1d", zoom_bars=100):
             apds.append(mpf.make_addplot(df['Sell_Signal'], ax=ax_candle, type='scatter', 
                                           markersize=120, marker='v', color='#f44336'))
         
+        # New Markers for Patterns
+        if bull_markers.notna().any():
+            apds.append(mpf.make_addplot(bull_markers, ax=ax_candle, type='scatter', 
+                                          markersize=60, marker='^', color='#00e676'))
+        if bear_markers.notna().any():
+            apds.append(mpf.make_addplot(bear_markers, ax=ax_candle, type='scatter', 
+                                          markersize=60, marker='v', color='#ff1744'))
+        
+        current_price = df['Close'].iloc[-1]
+
         mpf.plot(df, type='candle', style=s, ax=ax_candle, volume=ax_volume,
-                 hlines=dict(hlines=[support, resistance], colors=['#4caf50','#f44336'], 
-                            linestyle='-.', linewidths=0.8),
+                 hlines=dict(hlines=[support, resistance, current_price], 
+                            colors=['#4caf50','#f44336', '#ffffff'], 
+                            linestyle='-.', linewidths=[0.8, 0.8, 1.2]),
                  addplot=apds if apds else None, warn_too_much_data=2000)
         
         ax_candle.set_title(f"{ticker_symbol} — {title_suffix}  |  EMA50 (cyan) · EMA200 (orange)", 
