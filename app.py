@@ -32,6 +32,11 @@ def load_data():
 
 with st.spinner("🔄 Загрузка и анализ рынка... (это может занять 1-2 минуты)"):
     df_scan, macro_data, fg_value, required_mos = load_data()
+    
+    # Auto-fix cache for commodities update
+    if not df_scan.empty and "Commodity" not in df_scan["Type"].values:
+        load_data.clear()
+        st.rerun()
 
 # ============================================================
 # SIDEBAR: Global Guard Macro Module
@@ -154,22 +159,41 @@ with tab_scanner:
                 selected_idx = event.selection.rows[0]
                 clicked_asset = df_display_table.iloc[selected_idx]["Asset"]
                 st.markdown("---")
-                st.subheader(f"🔍 График: {clicked_asset}")
+                col_title, col_tf, col_zin, col_zout = st.columns([3, 2, 0.5, 0.5])
+                with col_title:
+                    st.subheader(f"🔍 График: {clicked_asset}")
+                with col_tf:
+                    scan_tf = st.radio("Таймфрейм", ["15m", "1h", "4h", "1d"], index=3, horizontal=True, label_visibility="collapsed", key=f"scan_tf_{clicked_asset}")
+                with col_zin:
+                    if st.button("🔍+", help="Увеличить", use_container_width=True, key=f"sz_in_{clicked_asset}"):
+                        st.session_state.zoom_level = max(20, st.session_state.zoom_level - 30)
+                        st.rerun()
+                with col_zout:
+                    if st.button("🔍−", help="Уменьшить", use_container_width=True, key=f"sz_out_{clicked_asset}"):
+                        st.session_state.zoom_level = min(500, st.session_state.zoom_level + 30)
+                        st.rerun()
+                        
                 with st.spinner("Загрузка графика..."):
-                    fig, patterns = generate_chart(clicked_asset, timeframe="1d", zoom_bars=100)
+                    fig, patterns = generate_chart(clicked_asset, timeframe=scan_tf, zoom_bars=st.session_state.get("zoom_level", 100))
+                    if patterns:
+                        st.info(f"🔍 **Обнаружены паттерны:** {', '.join(patterns)}")
                     if fig:
                         st.pyplot(fig)
-                        if patterns:
-                            st.info(f"Паттерны: {', '.join(patterns)}")
         except TypeError:
             # Fallback for older streamlit versions that don't support on_select
             st.dataframe(styled, use_container_width=True, hide_index=True)
             clicked_asset = st.selectbox("Посмотреть график актива из таблицы:", [""] + df_display_table["Asset"].tolist())
             if clicked_asset:
                 st.markdown("---")
-                st.subheader(f"🔍 График: {clicked_asset}")
+                col_title, col_tf = st.columns([3, 2])
+                with col_title:
+                    st.subheader(f"🔍 График: {clicked_asset}")
+                with col_tf:
+                    scan_tf_2 = st.radio("Таймфрейм", ["15m", "1h", "4h", "1d"], index=3, horizontal=True, label_visibility="collapsed", key=f"scan_tf_2_{clicked_asset}")
                 with st.spinner("Загрузка графика..."):
-                    fig, patterns = generate_chart(clicked_asset, timeframe="1d")
+                    fig, patterns = generate_chart(clicked_asset, timeframe=scan_tf_2)
+                    if patterns:
+                        st.info(f"🔍 **Обнаружены паттерны:** {', '.join(patterns)}")
                     if fig:
                         st.pyplot(fig)
             
@@ -201,10 +225,9 @@ with tab_charts:
         with col_asset:
             selected_asset = st.selectbox("Актив", filtered_df_c["Asset"].tolist(), key="chart_asset_sel")
         with col_tf:
-            selected_tf = st.selectbox(
-                "Таймфрейм", ["15m", "1h", "4h", "1d"], index=3,
-                format_func=lambda x: {"15m": "15 Минут", "1h": "1 Час", "4h": "4 Часа", "1d": "1 День"}[x],
-                key="chart_tf_sel"
+            selected_tf = st.radio(
+                "Таймфрейм", ["15m", "1h", "4h", "1d"], index=3, horizontal=True,
+                label_visibility="collapsed", key="chart_tf_sel"
             )
         with col_zin:
             st.markdown("<br>", unsafe_allow_html=True)
@@ -224,9 +247,9 @@ with tab_charts:
                     zoom_bars=st.session_state.zoom_level
                 )
                 if fig:
-                    st.pyplot(fig)
                     if patterns:
-                        st.info(f"🔍 Обнаружены паттерны: {', '.join(patterns)}")
+                        st.info(f"🔍 **Обнаружены паттерны:** {', '.join(patterns)}")
+                    st.pyplot(fig)
                 else:
                     st.warning("Не удалось загрузить данные для графика.")
 
@@ -330,7 +353,7 @@ with tab_portfolio:
                 live_price = float(match.iloc[0]["Price"])
 
     with col_t2:
-        trade_price = st.number_input("Цена ($)", value=float(live_price) if float(live_price) > 0 else 0.01, min_value=0.01, step=0.01, key="trade_price")
+        trade_price = st.number_input("Цена ($)", value=float(live_price) if float(live_price) > 0 else 0.01, min_value=0.01, step=0.01, key=f"trade_price_{trade_asset}" if trade_asset else "trade_price")
     with col_t3:
         trade_qty = st.number_input("Кол-во", value=1, min_value=1, step=1, key="trade_qty")
     with col_t4:
@@ -359,12 +382,11 @@ with tab_portfolio:
         st.markdown("##### 📈 Live График для Торговли")
         if "zoom_level" not in st.session_state:
             st.session_state.zoom_level = 100
-        col_ptf, col_p_zin, col_p_zout, _ = st.columns([1, 0.5, 0.5, 2])
+        col_ptf, col_p_zin, col_p_zout, _ = st.columns([1.5, 0.5, 0.5, 1.5])
         with col_ptf:
-            port_tf = st.selectbox(
-                "Таймфрейм", ["15m", "1h", "4h", "1d"], index=0,
-                format_func=lambda x: {"15m": "15 Минут", "1h": "1 Час", "4h": "4 Часа", "1d": "1 День"}[x],
-                key="port_tf_sel"
+            port_tf = st.radio(
+                "Таймфрейм", ["15m", "1h", "4h", "1d"], index=0, horizontal=True,
+                label_visibility="collapsed", key="port_tf_sel"
             )
         with col_p_zin:
             st.markdown("<br>", unsafe_allow_html=True)
@@ -378,7 +400,9 @@ with tab_portfolio:
                 st.rerun()
                 
         with st.spinner(f"Загрузка графика {trade_asset}..."):
-            fig, _ = generate_chart(trade_asset, timeframe=port_tf, zoom_bars=st.session_state.zoom_level)
+            fig, patterns = generate_chart(trade_asset, timeframe=port_tf, zoom_bars=st.session_state.get("zoom_level", 100))
+            if patterns:
+                st.info(f"🔍 **Обнаружены паттерны:** {', '.join(patterns)}")
             if fig:
                 st.pyplot(fig)
     
