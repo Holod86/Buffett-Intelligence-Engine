@@ -22,7 +22,7 @@ def get_portfolio(session_state):
     return session_state.portfolio
 
 def execute_buy(session_state, ticker, price, qty):
-    """Execute a virtual buy order."""
+    """Execute a virtual buy order (Long or Cover Short)."""
     portfolio = get_portfolio(session_state)
     cost = price * qty
     
@@ -33,58 +33,124 @@ def execute_buy(session_state, ticker, price, qty):
     
     if ticker in portfolio["holdings"]:
         existing = portfolio["holdings"][ticker]
-        total_qty = existing["qty"] + qty
-        avg_price = ((existing["avg_price"] * existing["qty"]) + (price * qty)) / total_qty
-        portfolio["holdings"][ticker] = {"qty": total_qty, "avg_price": round(avg_price, 4)}
+        current_qty = existing["qty"]
+        if current_qty < 0:
+            # Covering a short position
+            cover_qty = min(abs(current_qty), qty)
+            remaining_buy_qty = qty - cover_qty
+            
+            pnl_realized = (existing["avg_price"] - price) * cover_qty
+            new_qty = current_qty + qty
+            
+            if new_qty == 0:
+                del portfolio["holdings"][ticker]
+            elif new_qty < 0:
+                portfolio["holdings"][ticker]["qty"] = new_qty
+            else:
+                # Flipped from short to long
+                portfolio["holdings"][ticker] = {"qty": new_qty, "avg_price": price}
+                
+            portfolio["trade_log"].append({
+                "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "action": "BUY (Cover)" if new_qty <= 0 else "BUY (Cover+Long)",
+                "ticker": ticker,
+                "price": price,
+                "qty": qty,
+                "total": round(cost, 2),
+                "pnl": round(pnl_realized, 2)
+            })
+        else:
+            # Adding to existing long
+            total_qty = current_qty + qty
+            avg_price = ((existing["avg_price"] * current_qty) + (price * qty)) / total_qty
+            portfolio["holdings"][ticker] = {"qty": total_qty, "avg_price": round(avg_price, 4)}
+            portfolio["trade_log"].append({
+                "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "action": "BUY",
+                "ticker": ticker,
+                "price": price,
+                "qty": qty,
+                "total": round(cost, 2)
+            })
     else:
+        # New long position
         portfolio["holdings"][ticker] = {"qty": qty, "avg_price": price}
-    
-    portfolio["trade_log"].append({
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "action": "BUY",
-        "ticker": ticker,
-        "price": price,
-        "qty": qty,
-        "total": round(cost, 2)
-    })
+        portfolio["trade_log"].append({
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "action": "BUY",
+            "ticker": ticker,
+            "price": price,
+            "qty": qty,
+            "total": round(cost, 2)
+        })
     
     _update_equity(portfolio, {})
     return True, f"Куплено {qty} x {ticker} по ${price}"
 
 def execute_sell(session_state, ticker, price, qty):
-    """Execute a virtual sell order."""
+    """Execute a virtual sell order (Sell Long or Short)."""
     portfolio = get_portfolio(session_state)
-    
-    if ticker not in portfolio["holdings"]:
-        return False, "Актив не найден в портфеле"
-    
-    existing = portfolio["holdings"][ticker]
-    if qty > existing["qty"]:
-        return False, f"Недостаточно единиц (есть: {existing['qty']})"
-    
     revenue = price * qty
     portfolio["cash"] += revenue
     
-    pnl = (price - existing["avg_price"]) * qty
-    
-    new_qty = existing["qty"] - qty
-    if new_qty == 0:
-        del portfolio["holdings"][ticker]
+    if ticker in portfolio["holdings"]:
+        existing = portfolio["holdings"][ticker]
+        current_qty = existing["qty"]
+        
+        if current_qty > 0:
+            # Selling a long position
+            sell_qty = min(current_qty, qty)
+            remaining_short_qty = qty - sell_qty
+            
+            pnl_realized = (price - existing["avg_price"]) * sell_qty
+            new_qty = current_qty - qty
+            
+            if new_qty == 0:
+                del portfolio["holdings"][ticker]
+            elif new_qty > 0:
+                portfolio["holdings"][ticker]["qty"] = new_qty
+            else:
+                # Flipped from long to short
+                portfolio["holdings"][ticker] = {"qty": new_qty, "avg_price": price}
+                
+            portfolio["trade_log"].append({
+                "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "action": "SELL" if new_qty >= 0 else "SELL (Short)",
+                "ticker": ticker,
+                "price": price,
+                "qty": qty,
+                "total": round(revenue, 2),
+                "pnl": round(pnl_realized, 2)
+            })
+        else:
+            # Adding to existing short
+            total_qty = current_qty - qty
+            # average short price = weighted average of short entry prices
+            avg_price = ((existing["avg_price"] * abs(current_qty)) + (price * qty)) / abs(total_qty)
+            portfolio["holdings"][ticker] = {"qty": total_qty, "avg_price": round(avg_price, 4)}
+            
+            portfolio["trade_log"].append({
+                "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "action": "SHORT",
+                "ticker": ticker,
+                "price": price,
+                "qty": qty,
+                "total": round(revenue, 2)
+            })
     else:
-        portfolio["holdings"][ticker]["qty"] = new_qty
-    
-    portfolio["trade_log"].append({
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "action": "SELL",
-        "ticker": ticker,
-        "price": price,
-        "qty": qty,
-        "total": round(revenue, 2),
-        "pnl": round(pnl, 2)
-    })
+        # New short position
+        portfolio["holdings"][ticker] = {"qty": -qty, "avg_price": price}
+        portfolio["trade_log"].append({
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "action": "SHORT",
+            "ticker": ticker,
+            "price": price,
+            "qty": qty,
+            "total": round(revenue, 2)
+        })
     
     _update_equity(portfolio, {})
-    return True, f"Продано {qty} x {ticker} по ${price} (P&L: ${pnl:+.2f})"
+    return True, f"Продано {qty} x {ticker} по ${price}"
 
 def _update_equity(portfolio, current_prices):
     """Update equity history with current portfolio value."""
@@ -161,11 +227,19 @@ def get_holdings_df(portfolio, current_prices=None):
     rows = []
     for ticker, data in portfolio["holdings"].items():
         current = current_prices.get(ticker, data["avg_price"]) if current_prices else data["avg_price"]
-        pnl = (current - data["avg_price"]) * data["qty"]
-        pnl_pct = ((current - data["avg_price"]) / data["avg_price"]) * 100 if data["avg_price"] > 0 else 0
+        
+        qty = data["qty"]
+        if qty > 0:
+            pnl = (current - data["avg_price"]) * qty
+            pnl_pct = ((current - data["avg_price"]) / data["avg_price"]) * 100 if data["avg_price"] > 0 else 0
+        else:
+            # For short positions, lower price = profit
+            pnl = (data["avg_price"] - current) * abs(qty)
+            pnl_pct = ((data["avg_price"] - current) / data["avg_price"]) * 100 if data["avg_price"] > 0 else 0
+            
         rows.append({
             "Тикер": ticker,
-            "Кол-во": data["qty"],
+            "Кол-во": qty,
             "Ср. цена": f"${data['avg_price']:.2f}",
             "Текущая": f"${current:.2f}",
             "P&L": f"${pnl:+.2f}",

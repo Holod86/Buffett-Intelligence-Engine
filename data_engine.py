@@ -172,20 +172,6 @@ def evaluate_stock(ticker_str, required_mos=30, prefer_defensive=False):
         high_52 = info.get("fiftyTwoWeekHigh", 0)
         is_52w_low = price <= (low_52 * 1.05) if low_52 else False
         is_52w_high = price >= (high_52 * 0.95) if high_52 else False
-        
-        # Support/Resistance on 1D for Entry/Exit
-        rec_buy = "N/A"
-        rec_sell = "N/A"
-        try:
-            df_1d = ticker.history(period="6mo", interval="1d")
-            if not df_1d.empty and len(df_1d) > 20:
-                recent_1d = df_1d.tail(20)
-                target_buy = recent_1d['Low'].min()
-                target_sell = recent_1d['High'].max()
-                rec_buy = f"${target_buy:.2f}"
-                rec_sell = f"${target_sell:.2f}"
-        except Exception:
-            pass
             
         return {
             "Asset": ticker_str,
@@ -200,8 +186,6 @@ def evaluate_stock(ticker_str, required_mos=30, prefer_defensive=False):
             "Signal 1H": signal_1h,
             "Signal 4H": signal_4h,
             "Signal 1D": signal_1d,
-            "Entry (Support)": rec_buy,
-            "Exit (Resistance)": rec_sell,
             "Intrinsic Value": round(intrinsic_value, 2),
             "52W Low": is_52w_low,
             "52W High": is_52w_high,
@@ -252,22 +236,6 @@ def fetch_crypto_data():
                 
             signal_1h = "BUY" if undervaluation > 40 else "SELL"
             signal_4h = "BUY" if undervaluation > 45 else "SELL"
-            
-            # Support/Resistance
-            rec_buy = "N/A"
-            rec_sell = "N/A"
-            try:
-                internal_ticker = f"{coin.get('symbol', '').upper()}-USD"
-                t_cryp = yf.Ticker(internal_ticker)
-                df_1d = t_cryp.history(period="6mo", interval="1d")
-                if not df_1d.empty and len(df_1d) > 20:
-                    recent_1d = df_1d.tail(20)
-                    target_buy = recent_1d['Low'].min()
-                    target_sell = recent_1d['High'].max()
-                    rec_buy = f"${target_buy:.2f}"
-                    rec_sell = f"${target_sell:.2f}"
-            except Exception:
-                pass
                 
             results.append({
                 "Asset": coin.get("symbol", "").upper(),
@@ -283,14 +251,76 @@ def fetch_crypto_data():
                 "Signal 1H": signal_1h,
                 "Signal 4H": signal_4h,
                 "Signal 1D": signal_1d,
-                "Entry (Support)": rec_buy,
-                "Exit (Resistance)": rec_sell,
                 "Intrinsic Value": None,
                 "52W Low": False,
                 "52W High": False,
             })
     except Exception as e:
         print(f"Error fetching crypto: {e}")
+    return results
+
+# ============================================================
+# COMMODITIES EVALUATION
+# ============================================================
+
+def fetch_commodities_data():
+    results = []
+    tickers = ["GC=F", "SI=F", "CL=F", "NG=F", "HG=F", "ZW=F", "ZC=F", "ZS=F", "KC=F", "SB=F", "CT=F", "CC=F", "PL=F", "PA=F", "HO=F"]
+    names = {"GC=F": "Gold", "SI=F": "Silver", "CL=F": "Crude Oil", "NG=F": "Natural Gas", "HG=F": "Copper", 
+             "ZW=F": "Wheat", "ZC=F": "Corn", "ZS=F": "Soybeans", "KC=F": "Coffee", "SB=F": "Sugar", 
+             "CT=F": "Cotton", "CC=F": "Cocoa", "PL=F": "Platinum", "PA=F": "Palladium", "HO=F": "Heating Oil"}
+    try:
+        data = yf.download(tickers, period="1y", interval="1d", group_by="ticker", progress=False)
+        for t in tickers:
+            df_t = data[t] if len(tickers) > 1 else data
+            if df_t.empty or df_t['Close'].isna().all(): continue
+            
+            # yf.download might return series or scalars inside df_t due to multi-index
+            # Let's extract safely
+            close_series = df_t['Close'].dropna()
+            if close_series.empty: continue
+            
+            price = float(close_series.iloc[-1])
+            high_52 = float(df_t['High'].max())
+            low_52 = float(df_t['Low'].min())
+            
+            undervaluation = 0
+            if price < high_52 and high_52 > 0:
+                undervaluation = ((high_52 - price) / high_52) * 100
+                
+            sma200 = float(close_series.rolling(200).mean().iloc[-1]) if len(close_series) >= 200 else price
+            
+            signal_1d = "WAIT"
+            if price > sma200 and undervaluation > 20: 
+                signal_1d = "BUY"
+            elif undervaluation > 15:
+                signal_1d = "WATCH"
+                
+            sma10 = float(close_series.rolling(10).mean().iloc[-1]) if len(close_series) >= 10 else price
+            sma20 = float(close_series.rolling(20).mean().iloc[-1]) if len(close_series) >= 20 else price
+            signal_1h = "BUY" if price > sma10 else "SELL"
+            signal_4h = "BUY" if price > sma20 else "SELL"
+            
+            results.append({
+                "Asset": names[t],
+                "Type": "Commodity",
+                "Sector": "Commodity",
+                "Price": round(price, 2),
+                "P/E": None,
+                "P/B": None,
+                "ROE %": None,
+                "FCF Yield %": None,
+                "FDV/MCap": None,
+                "Undervaluation %": round(undervaluation, 1),
+                "Signal 1H": signal_1h,
+                "Signal 4H": signal_4h,
+                "Signal 1D": signal_1d,
+                "Intrinsic Value": None,
+                "52W Low": price <= low_52 * 1.05,
+                "52W High": price >= high_52 * 0.95,
+            })
+    except Exception as e:
+        print(f"Error fetching commodities: {e}")
     return results
 
 # ============================================================
@@ -328,6 +358,9 @@ def get_market_scan():
             
     crypto_data = fetch_crypto_data()
     data.extend(crypto_data)
+    
+    commodities_data = fetch_commodities_data()
+    data.extend(commodities_data)
     
     df = pd.DataFrame(data)
     

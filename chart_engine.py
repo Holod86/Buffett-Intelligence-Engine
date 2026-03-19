@@ -110,20 +110,31 @@ def calculate_macd(series, fast=12, slow=26, signal=9):
 # MAIN CHART GENERATOR
 # ============================================================
 
+def get_internal_ticker(ticker_symbol):
+    internal_ticker = ticker_symbol
+    crypto_map = {"BTC": "BTC-USD", "ETH": "ETH-USD", "SOL": "SOL-USD", 
+                  "ADA": "ADA-USD", "DOT": "DOT-USD", "AVAX": "AVAX-USD",
+                  "LINK": "LINK-USD", "POL": "POL-USD", "UNI": "UNI-USD", "AAVE": "AAVE-USD"}
+    commodity_map = {"Gold": "GC=F", "Silver": "SI=F", "Crude Oil": "CL=F", "Natural Gas": "NG=F", 
+                     "Copper": "HG=F", "Wheat": "ZW=F", "Corn": "ZC=F", "Soybeans": "ZS=F", 
+                     "Coffee": "KC=F", "Sugar": "SB=F", "Cotton": "CT=F", "Cocoa": "CC=F", 
+                     "Platinum": "PL=F", "Palladium": "PA=F", "Heating Oil": "HO=F"}
+    if ticker_symbol in crypto_map:
+        internal_ticker = crypto_map[ticker_symbol]
+    elif ticker_symbol in commodity_map:
+        internal_ticker = commodity_map[ticker_symbol]
+    return internal_ticker
+
 def generate_chart(ticker_symbol, timeframe="1d", zoom_bars=100):
     try:
-        # Crypto ticker mapping
-        internal_ticker = ticker_symbol
-        crypto_map = {"BTC": "BTC-USD", "ETH": "ETH-USD", "SOL": "SOL-USD", 
-                      "ADA": "ADA-USD", "DOT": "DOT-USD", "AVAX": "AVAX-USD",
-                      "LINK": "LINK-USD", "POL": "POL-USD", "UNI": "UNI-USD", "AAVE": "AAVE-USD"}
-        if ticker_symbol in crypto_map:
-            internal_ticker = crypto_map[ticker_symbol]
-            
+        internal_ticker = get_internal_ticker(ticker_symbol)
         ticker = yf.Ticker(internal_ticker)
         
         # Fetch larger dataset for full indicator calculation before slicing
-        if timeframe == "1h":
+        if timeframe == "15m":
+            df = ticker.history(period="60d", interval="15m")
+            title_suffix = "15M"
+        elif timeframe == "1h":
             df = ticker.history(period="3mo", interval="1h")
             title_suffix = "1H"
         elif timeframe == "4h":
