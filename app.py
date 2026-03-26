@@ -27,11 +27,11 @@ st.markdown("##### Анализ недооцененных активов по �
 # ============================================================
 
 @st.cache_data(ttl=14400, show_spinner=False)
-def load_data():
+def load_market_data():
     return get_market_scan()
 
 with st.spinner("🔄 Загрузка и анализ рынка... (это может занять 1-2 минуты)"):
-    df_scan, macro_data, fg_value, required_mos = load_data()
+    df_scan, macro_data, fg_value, required_mos = load_market_data()
     
     # Auto-fix cache for missing data with retry limit to avoid infinite reloads
     if "data_retries" not in st.session_state:
@@ -41,7 +41,7 @@ with st.spinner("🔄 Загрузка и анализ рынка... (это м�
         types_present = df_scan["Type"].values
         if "Commodity" not in types_present or "Stock" not in types_present or "Crypto" not in types_present:
             st.session_state.data_retries += 1
-            load_data.clear()
+            load_market_data.clear()
             st.rerun()
             
     # Reset retries if data is healthy
@@ -74,7 +74,7 @@ tg_chat_id = st.sidebar.text_input("Chat ID", key="tg_chat_id")
 
 st.sidebar.markdown("---")
 if st.sidebar.button("🔄 ОБНОВИТЬ ДАННЫЕ ВРУЧНУЮ", use_container_width=True):
-    load_data.clear()
+    load_market_data.clear()
     st.rerun()
 
 # ============================================================
@@ -114,7 +114,7 @@ with tab_scanner:
     if df_display.empty or "Undervaluation %" not in df_display.columns:
         st.warning("⏳ Данные ещё загружаются или произошла ошибка. Попробуйте обновить.")
         if st.button("🔄 Перезагрузить данные"):
-            load_data.clear()
+            load_market_data.clear()
             st.rerun()
         st.stop()
     
