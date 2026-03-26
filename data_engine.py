@@ -3,6 +3,8 @@ import pandas as pd
 import requests
 import numpy as np
 
+import ta_engine
+
 # ============================================================
 # MACRO MODULE "GLOBAL GUARD"
 # ============================================================
@@ -181,12 +183,16 @@ def evaluate_stock(ticker_str, required_mos=30, prefer_defensive=False):
         high_52 = info.get("fiftyTwoWeekHigh", 0)
         is_52w_low = price <= (low_52 * 1.05) if low_52 else False
         is_52w_high = price >= (high_52 * 0.95) if high_52 else False
+        
+        master_signal, signal_details = ta_engine.evaluate_master_signal(ticker)
             
         return {
             "Asset": ticker_str,
             "Type": "Stock",
             "Sector": sector,
             "Price": round(price, 2),
+            "Общий Сигнал": master_signal,
+            "Детали Сигнала": signal_details,
             "P/E": round(pe_ratio, 1) if pe_ratio else None,
             "P/B": round(pb_ratio, 2) if pb_ratio else None,
             "ROE %": round(roe_pct, 1),
@@ -245,12 +251,20 @@ def fetch_crypto_data():
                 
             signal_1h = "BUY" if undervaluation > 40 else "SELL"
             signal_4h = "BUY" if undervaluation > 45 else "SELL"
+            
+            symbol = coin.get("symbol", "").upper()
+            try:
+                master_signal, signal_details = ta_engine.evaluate_master_signal(yf.Ticker(f"{symbol}-USD"))
+            except:
+                master_signal, signal_details = "WAIT", "No crypto data"
                 
             results.append({
-                "Asset": coin.get("symbol", "").upper(),
+                "Asset": symbol,
                 "Type": "Crypto",
                 "Sector": "Crypto",
                 "Price": round(price, 2),
+                "Общий Сигнал": master_signal,
+                "Детали Сигнала": signal_details,
                 "P/E": None,
                 "P/B": None,
                 "ROE %": None,
@@ -310,11 +324,18 @@ def fetch_commodities_data():
             signal_1h = "BUY" if price > sma10 else "SELL"
             signal_4h = "BUY" if price > sma20 else "SELL"
             
+            try:
+                master_signal, signal_details = ta_engine.evaluate_master_signal(yf.Ticker(t))
+            except:
+                master_signal, signal_details = "WAIT", "No commodity data"
+            
             results.append({
                 "Asset": names[t],
                 "Type": "Commodity",
                 "Sector": "Commodity",
                 "Price": round(price, 2),
+                "Общий Сигнал": master_signal,
+                "Детали Сигнала": signal_details,
                 "P/E": None,
                 "P/B": None,
                 "ROE %": None,

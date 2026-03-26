@@ -135,11 +135,17 @@ with tab_scanner:
     def color_signal(val):
         if pd.isna(val) or val == "N/A":
             return ""
-        if val == "BUY":
+        
+        val_str = str(val).upper()
+        if "BUY" in val_str:
+            if "STRONG" in val_str:
+                return "color: #00ff00; font-weight: bold; background-color: rgba(0, 255, 0, 0.1);"
             return "color: #4caf50; font-weight: bold"
-        elif val == "WATCH":
+        elif "WATCH" in val_str:
             return "color: #ff9800; font-weight: bold"
-        elif val in ["WAIT", "SELL"]:
+        elif "SELL" in val_str:
+            if "STRONG" in val_str:
+                return "color: #ff0000; font-weight: bold; background-color: rgba(255, 0, 0, 0.1);"
             return "color: #f44336; font-weight: bold"
         return ""
 
@@ -147,8 +153,15 @@ with tab_scanner:
     st.caption(f"Найдены активы с высоким уровнем соответствия критериям Баффета | MoS ≥ {required_mos}%")
 
     if not df_display.empty:
-        df_display_table = df_display.drop(columns=["Type", "Entry (Support)", "Exit (Resistance)"], errors="ignore")
-        signal_cols = [c for c in ['Signal 1H', 'Signal 4H', 'Signal 1D'] if c in df_display_table.columns]
+        # Hide internal analytical columns from the visual table, keeping them in the background data
+        cols_to_hide = [
+            "Type", "Sector", "Entry (Support)", "Exit (Resistance)", 
+            "P/E", "P/B", "ROE %", "FCF Yield %", "FDV/MCap", "Intrinsic Value", 
+            "52W Low", "52W High", "Детали Сигнала"
+        ]
+        df_display_table = df_display.drop(columns=cols_to_hide, errors="ignore")
+        
+        signal_cols = [c for c in ['Signal 1H', 'Signal 4H', 'Signal 1D', 'Общий Сигнал'] if c in df_display_table.columns]
         
         if signal_cols:
             styled = df_display_table.style.map(color_signal, subset=signal_cols)
