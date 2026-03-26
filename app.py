@@ -33,11 +33,20 @@ def load_data():
 with st.spinner("🔄 Загрузка и анализ рынка... (это может занять 1-2 минуты)"):
     df_scan, macro_data, fg_value, required_mos = load_data()
     
-    # Auto-fix cache for commodities update
-    if not df_scan.empty and "Commodity" not in df_scan["Type"].values:
-        load_data.clear()
-        st.rerun()
+    # Auto-fix cache for missing data with retry limit to avoid infinite reloads
+    if "data_retries" not in st.session_state:
+        st.session_state.data_retries = 0
 
+    if not df_scan.empty and st.session_state.data_retries < 2:
+        types_present = df_scan["Type"].values
+        if "Commodity" not in types_present or "Stock" not in types_present or "Crypto" not in types_present:
+            st.session_state.data_retries += 1
+            load_data.clear()
+            st.rerun()
+            
+    # Reset retries if data is healthy
+    if not df_scan.empty and "Commodity" in df_scan["Type"].values and "Stock" in df_scan["Type"].values and "Crypto" in df_scan["Type"].values:
+        st.session_state.data_retries = 0
 # ============================================================
 # SIDEBAR: Global Guard Macro Module
 # ============================================================

@@ -134,8 +134,13 @@ def evaluate_stock(ticker_str, required_mos=30, prefer_defensive=False):
                 intrinsic_value += eps_proj / ((1 + discount_rate) ** year)
             terminal_value = (eps_proj * (1 + terminal_rate)) / (discount_rate - terminal_rate)
             intrinsic_value += terminal_value / ((1 + discount_rate) ** 5)
+            
+            target_price = info.get("targetMeanPrice") or 0
+            # Blend or use target price if it is significantly higher, as DCF can be heavily pessimistic
+            if target_price > intrinsic_value:
+                intrinsic_value = target_price
         else:
-            intrinsic_value = info.get("targetMeanPrice", price * 1.1)
+            intrinsic_value = info.get("targetMeanPrice") or (price * 1.1)
         
         undervaluation = 0
         if intrinsic_value > price:
@@ -350,17 +355,27 @@ def get_market_scan():
         defensive_extra = ["CL", "GIS", "K", "SJM", "ABT", "MDT", "NEE", "DUK", "SO", "XEL"]
         watch_stocks = list(set(watch_stocks + defensive_extra))
     
+    import concurrent.futures
+
     data = []
-    for t in watch_stocks:
-        stock_data = evaluate_stock(t, required_mos=required_mos, prefer_defensive=False)
-        if stock_data:
-            data.append(stock_data)
+    # Fetch stocks in parallel to speed up and reduce timeout
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(evaluate_stock, t, required_mos=required_mos, prefer_defensive=False): t for t in watch_stocks}
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                stock_data = future.result()
+                if stock_data:
+                    data.append(stock_data)
+            except Exception as e:
+                print(f"Parallel fetch error for {futures[future]}: {e}")
             
     crypto_data = fetch_crypto_data()
-    data.extend(crypto_data)
+    if crypto_data:
+        data.extend(crypto_data)
     
     commodities_data = fetch_commodities_data()
-    data.extend(commodities_data)
+    if commodities_data:
+        data.extend(commodities_data)
     
     df = pd.DataFrame(data)
     
