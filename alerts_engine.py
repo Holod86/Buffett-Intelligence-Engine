@@ -22,39 +22,48 @@ def check_alerts(df_scan, macro_data, fg_value):
         is_52w_low = row.get("52W Low", False)
         roe = row.get("ROE %", 0)
         
-        # === Trigger 1: "Идеальное совпадение" ===
-        # Discount > 30% + BUY signal on 1D
-        if underval > 30 and signal_1d == "BUY":
-            alerts.append({
-                "type": "🎯 ИДЕАЛЬНОЕ СОВПАДЕНИЕ",
-                "ticker": asset,
-                "message": f"Недооценён на {underval:.1f}% + Сигнал BUY на 1D",
-                "risk": _assess_risk(underval, fg_value),
-                "priority": "HIGH"
-            })
+        master_signal = row.get("Общий Сигнал", "")
+        master_details = row.get("Детали Сигнала", "")
         
-        # === Trigger 2: "52-Week Zone" ===
-        if is_52w_low and (underval > 15 or (roe and roe > 15)):
+        # === Trigger 1: "Master Signal BUY" ===
+        if "BUY" in master_signal:
+            priority = "HIGH" if "STRONG" in master_signal else "MEDIUM"
+            title = "⭐ STRONG ОБЩИЙ СИГНАЛ" if "STRONG" in master_signal else "💡 ПОДТВЕРЖДЕННЫЙ СИГНАЛ"
             alerts.append({
-                "type": "📉 52W МИНИМУМ",
+                "type": title,
                 "ticker": asset,
-                "message": f"Качественный актив на 52-нед. минимуме (Underval: {underval:.1f}%)",
+                "message": f"{master_signal}: {master_details}. Недооценка: {underval:.1f}%",
                 "risk": _assess_risk(underval, fg_value),
-                "priority": "MEDIUM"
+                "priority": priority
             })
+            continue # If it's a confirmed master signal, no need to spam other alerts for this asset
         
-        # === Trigger 3: Extreme Fear + Good Value ===
-        if fg_value < 25 and underval > 20:
+        # === Trigger 2: "Master Signal SELL" ===
+        if "SELL" in master_signal:
+            priority = "HIGH" if "STRONG" in master_signal else "MEDIUM"
+            title = "🚨 STRONG SELL СИГНАЛ" if "STRONG" in master_signal else "⚠️ SELL СИГНАЛ"
             alerts.append({
-                "type": "😱 ЭКСТРЕМАЛЬНЫЙ СТРАХ",
+                "type": title,
                 "ticker": asset,
-                "message": f"Fear&Greed={fg_value}. Агрессивный поиск: {asset} недооценён на {underval:.1f}%",
-                "risk": "MEDIUM",
-                "priority": "MEDIUM"
+                "message": f"{master_signal}: {master_details}.",
+                "risk": "HIGH",
+                "priority": priority
+            })
+            continue
+            
+        # === Trigger 3: "Идеальное совпадение по мультипликаторам (только если нет Master Signal)" ===
+        # Deep discount without full technical alignment
+        if underval > 40 and signal_1d == "BUY":
+            alerts.append({
+                "type": "🎯 ГЛУБОКАЯ НЕДООЦЕНКА",
+                "ticker": asset,
+                "message": f"Недооценён на {underval:.1f}% + Сигнал BUY на 1D (Ожидание тех. подтверждения)",
+                "risk": _assess_risk(underval, fg_value),
+                "priority": "LOW"
             })
     
     # === Market-wide alert: Extreme Greed ===
-    if fg_value > 75:
+    if fg_value > 80:
         alerts.insert(0, {
             "type": "🔥 ПЕРЕГРЕВ РЫНКА",
             "ticker": "РЫНОК",
