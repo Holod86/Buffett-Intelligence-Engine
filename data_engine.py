@@ -94,8 +94,12 @@ def evaluate_stock(ticker_str, required_mos=30, prefer_defensive=False):
         info = ticker.info
         
         price = info.get("currentPrice", info.get("previousClose", 0))
-        if price == 0:
-            return None
+        if not price or price == 0:
+            hist = ticker.history(period="1d")
+            if not hist.empty:
+                price = float(hist["Close"].iloc[-1])
+            else:
+                return None
         
         # Fundamentals
         roe = info.get("returnOnEquity", 0)
